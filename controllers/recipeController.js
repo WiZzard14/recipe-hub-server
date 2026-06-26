@@ -1,6 +1,6 @@
 import Recipe from '../models/Recipe.js';
 
-export const addRecipe = async (req, res) => {
+const addRecipe = async (req, res) => {
   try {
     const newRecipe = new Recipe(req.body);
     await newRecipe.save();
@@ -10,28 +10,31 @@ export const addRecipe = async (req, res) => {
   }
 };
 
-export const getAllRecipes = async (req, res) => {
+const getAllRecipes = async (req, res) => {
   try {
-    const { category, page = 1, limit = 10 } = req.query;
-    let query = {};
-
-    if (category) {
-      const categoriesArray = category.split(','); 
-      query.category = { $in: categoriesArray };
-    }
-
+    const page = parseInt(req.query.page) || 1; 
+    const limit = parseInt(req.query.limit) || 6; 
+    
     const skip = (page - 1) * limit;
 
-    const recipes = await Recipe.find(query).skip(skip).limit(parseInt(limit));
-    const totalRecipes = await Recipe.countDocuments(query);
+    const recipes = await Recipe.find()
+                          .sort({ createdAt: -1 }) 
+                          .skip(skip)
+                          .limit(limit);
+
+    const totalRecipes = await Recipe.countDocuments();
+    const totalPages = Math.ceil(totalRecipes / limit);
 
     res.status(200).json({
       recipes,
-      totalRecipes,
-      currentPage: parseInt(page),
-      totalPages: Math.ceil(totalRecipes / limit)
+      totalPages,
+      currentPage: page
     });
+
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error fetching recipes:", error);
+    res.status(500).json({ message: "Server Error to get recipes" });
   }
 };
+
+export { addRecipe, getAllRecipes };
