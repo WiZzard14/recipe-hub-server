@@ -46,10 +46,28 @@ export const getRecipeById = async (req, res) => {
 
 export const addRecipe = async (req, res) => {
   try {
-    const newRecipe = new Recipe(req.body);
+    const userId = req.user.id;
+    const isPremium = req.user.isPremium;
+
+    const userRecipeCount = await Recipe.countDocuments({ authorId: userId });
+
+    if (!isPremium && userRecipeCount >= 2) {
+      return res.status(403).json({ 
+        message: "You have reached your limit of 2 recipes. Please upgrade to Premium to add unlimited recipes." 
+      });
+    }
+
+    const newRecipe = new Recipe({
+      ...req.body,
+      authorId: userId, 
+      authorEmail: req.user.email 
+    });
+
     await newRecipe.save();
     res.status(201).json({ message: "Recipe added successfully!", recipe: newRecipe });
+
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error adding recipe:", error);
+    res.status(500).json({ message: "Server error while adding recipe" });
   }
 };
