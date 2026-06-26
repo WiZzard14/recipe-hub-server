@@ -8,6 +8,7 @@ import paymentRoutes from './routes/paymentRoutes.js';
 import recipeRoutes from './routes/recipeRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import { seedDefaults } from './seedDefaults.js';
 
 dotenv.config();
 
@@ -43,6 +44,7 @@ const connectDB = async () => {
   if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is missing in environment variables.');
   await mongoose.connect(process.env.MONGODB_URI);
   console.log('Successfully connected to MongoDB!');
+  await seedDefaults();
 };
 
 connectDB()
