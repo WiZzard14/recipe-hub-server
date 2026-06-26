@@ -111,10 +111,12 @@ export async function seedDefaults() {
         email: adminEmail,
         image: process.env.ADMIN_IMAGE || '',
         password: hashedPassword,
+      },
+      $set: {
         role: 'admin',
+        isBlocked: false,
         isPremium: true,
       },
-      $set: { role: 'admin', isBlocked: false, isPremium: true },
     },
     { new: true, upsert: true, setDefaultsOnInsert: true }
   );
