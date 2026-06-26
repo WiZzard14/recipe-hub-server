@@ -1,166 +1,84 @@
-import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+import { asyncHandler, cookieOptions, toSafeUser } from '../utils.js';
 
-export const register = async (req, res) => {
-  try {
-    const { name, email, password, image } = req.body;
+const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z]).{6,}$/;
 
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z]).{6,}$/;
-    if (!passwordRegex.test(password)) {
-      return res.status(400).json({ 
-        message: "Password must be at least 6 characters long, with one uppercase and one lowercase letter." 
-      });
-    }
+const signToken = (user) => jwt.sign(
+  { id: user._id.toString(), role: user.role, isPremium: user.isPremium, email: user.email },
+  process.env.JWT_SECRET,
+  { expiresIn: '7d' }
+);
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists with this email!" });
-    }
+const sendAuthResponse = (res, user, message) => {
+  const token = signToken(user);
+  res.cookie('token', token, cookieOptions());
+  return res.status(200).json({ message, user: toSafeUser(user) });
+};
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+export const register = asyncHandler(async (req, res) => {
+  const { name, email, password, image } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: 'Name, email and password are required.' });
+  }
+  if (!passwordRegex.test(password)) {
+    return res.status(400).json({ message: 'Password must be at least 6 characters with one uppercase and one lowercase letter.' });
+  }
+  const normalizedEmail = email.toLowerCase().trim();
+  const existingUser = await User.findOne({ email: normalizedEmail });
+  if (existingUser) return res.status(409).json({ message: 'User already exists with this email.' });
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
+  const user = await User.create({
+    name: name.trim(),
+    email: normalizedEmail,
+    password: hashedPassword,
+    image: image || '',
+    role: adminEmail && normalizedEmail === adminEmail ? 'admin' : 'user',
+  });
+  return res.status(201).json({ message: 'User registered successfully.', user: toSafeUser(user) });
+});
 
-    const newUser = new User({
-      name,
-      email,
+export const login = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ message: 'Email and password are required.' });
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  if (!user) return res.status(404).json({ message: 'User not found.' });
+  if (user.isBlocked) return res.status(403).json({ message: 'Your account is blocked by admin.' });
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(400).json({ message: 'Invalid credentials.' });
+  return sendAuthResponse(res, user, 'Logged in successfully.');
+});
+
+export const googleLogin = asyncHandler(async (req, res) => {
+  const { name, email, image } = req.body;
+  if (!email) return res.status(400).json({ message: 'Google email is required.' });
+  const normalizedEmail = email.toLowerCase().trim();
+  let user = await User.findOne({ email: normalizedEmail });
+  if (!user) {
+    const generatedPassword = `${Math.random().toString(36).slice(2)}Aa`;
+    const hashedPassword = await bcrypt.hash(generatedPassword, 10);
+    const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
+    user = await User.create({
+      name: name || normalizedEmail.split('@')[0],
+      email: normalizedEmail,
+      image: image || '',
       password: hashedPassword,
-      image: image || ""
+      role: adminEmail && normalizedEmail === adminEmail ? 'admin' : 'user',
     });
-
-    await newUser.save();
-    res.status(201).json({ message: "User registered successfully!" });
-
-  } catch (error) {
-    console.error("Registration Error:", error);
-    res.status(500).json({ message: "Server error during registration" });
   }
-};
+  if (user.isBlocked) return res.status(403).json({ message: 'Your account is blocked by admin.' });
+  return sendAuthResponse(res, user, 'Google login successful.');
+});
 
-export const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+export const getMe = asyncHandler(async (req, res) => res.json({ user: req.user }));
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: "User not found!" });
-    }
-
-    if (user.isBlocked) {
-      return res.status(403).json({ message: "Your account is blocked by admin." });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials!" });
-    }
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role, isPremium: user.isPremium, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days expiration
-    });
-
-    res.status(200).json({ 
-      message: "Logged in successfully!", 
-      user: { 
-        id: user._id, 
-        name: user.name, 
-        email: user.email, 
-        image: user.image,
-        role: user.role,
-        isPremium: user.isPremium
-      } 
-    });
-
-  } catch (error) {
-    console.error("Login Error:", error);
-    res.status(500).json({ message: "Server error during login" });
-  }
-};
-
-export const logout = async (req, res) => {
-  try {
-    res.clearCookie('token', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-    });
-    res.status(200).json({ message: "Logged out successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Logout failed" });
-  }
-};
-
-export const googleLogin = async (req, res) => {
-  try {
-    const { name, email, image } = req.body;
-
-    let user = await User.findOne({ email });
-
-    if (!user) {
-      const generatedPassword = Math.random().toString(36).slice(-8) + "A1a@";
-      const hashedPassword = await bcrypt.hash(generatedPassword, 10);
-
-      user = new User({
-        name,
-        email,
-        image: image || "",
-        password: hashedPassword,
-      });
-
-      await user.save();
-    }
-
-    if (user.isBlocked) {
-      return res.status(403).json({ message: "Your account is blocked by admin." });
-    }
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role, isPremium: user.isPremium, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 
-    });
-
-    res.status(200).json({ 
-      message: "Google login successful!", 
-      user: { 
-        id: user._id, 
-        name: user.name, 
-        email: user.email, 
-        image: user.image,
-        role: user.role,
-        isPremium: user.isPremium
-      } 
-    });
-
-  } catch (error) {
-    console.error("Google Login Error:", error);
-    res.status(500).json({ message: "Server error during Google login" });
-  }
-};
-
-export const getMe = async (req, res) => {
-    const token = req.cookies.token;
-    if (!token) return res.status(401).json({ message: "Unauthorized" });
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id);
-        res.status(200).json({ user });
-    } catch (err) {
-        res.status(401).json({ message: "Unauthorized" });
-    }
-};
+export const logout = asyncHandler(async (_req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : (process.env.COOKIE_SAMESITE || 'lax'),
+  });
+  return res.json({ message: 'Logged out successfully.' });
+});

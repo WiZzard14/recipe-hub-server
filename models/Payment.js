@@ -1,14 +1,18 @@
 import mongoose from 'mongoose';
 
-const paymentSchema = new mongoose.Schema({
-  userEmail: { type: String, required: true },
-  userId: { type: String, required: true },
-  amount: { type: Number, required: true },
-  recipeId: { type: String }, 
-  transactionId: { type: String, required: true },
-  paymentStatus: { type: String, default: 'success' },
-  paidAt: { type: Date, default: Date.now },
-});
+const paymentSchema = new mongoose.Schema(
+  {
+    userEmail: { type: String, required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    amount: { type: Number, required: true },
+    currency: { type: String, default: 'bdt' },
+    type: { type: String, enum: ['premium', 'recipe'], required: true },
+    recipeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe' },
+    transactionId: { type: String, required: true, unique: true },
+    paymentStatus: { type: String, default: 'success' },
+    paidAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
 
-const Payment = mongoose.model('Payment', paymentSchema);
-export default Payment;
+export default mongoose.models.Payment || mongoose.model('Payment', paymentSchema);
