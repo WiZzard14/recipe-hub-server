@@ -85,9 +85,17 @@ export const login = async (req, res) => {
   }
 };
 
-export const logout = (req, res) => {
-  res.clearCookie('token');
-  res.status(200).json({ message: "Logged out successfully!" });
+export const logout = async (req, res) => {
+  try {
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+    });
+    res.status(200).json({ message: "Logged out successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Logout failed" });
+  }
 };
 
 export const googleLogin = async (req, res) => {
@@ -143,4 +151,16 @@ export const googleLogin = async (req, res) => {
     console.error("Google Login Error:", error);
     res.status(500).json({ message: "Server error during Google login" });
   }
+};
+
+export const getMe = async (req, res) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ message: "Unauthorized" });
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findById(decoded.id);
+        res.status(200).json({ user });
+    } catch (err) {
+        res.status(401).json({ message: "Unauthorized" });
+    }
 };
