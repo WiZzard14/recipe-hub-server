@@ -89,3 +89,58 @@ export const logout = (req, res) => {
   res.clearCookie('token');
   res.status(200).json({ message: "Logged out successfully!" });
 };
+
+export const googleLogin = async (req, res) => {
+  try {
+    const { name, email, image } = req.body;
+
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      const generatedPassword = Math.random().toString(36).slice(-8) + "A1a@";
+      const hashedPassword = await bcrypt.hash(generatedPassword, 10);
+
+      user = new User({
+        name,
+        email,
+        image: image || "",
+        password: hashedPassword,
+      });
+
+      await user.save();
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({ message: "Your account is blocked by admin." });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, role: user.role, isPremium: user.isPremium, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 
+    });
+
+    res.status(200).json({ 
+      message: "Google login successful!", 
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        email: user.email, 
+        image: user.image,
+        role: user.role,
+        isPremium: user.isPremium
+      } 
+    });
+
+  } catch (error) {
+    console.error("Google Login Error:", error);
+    res.status(500).json({ message: "Server error during Google login" });
+  }
+};
