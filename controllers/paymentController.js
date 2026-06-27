@@ -5,8 +5,20 @@ import User from '../models/User.js';
 import { asyncHandler, getClientUrl } from '../utils.js';
 
 const getStripe = () => {
-  if (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes('replace')) return null;
-  return new Stripe(process.env.STRIPE_SECRET_KEY);
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!key || key.includes('replace') || key.includes('your_') || !key.startsWith('sk_')) return null;
+  return new Stripe(key);
+};
+
+const buildDemoCheckoutUrl = ({ clientUrl, checkoutType, recipeId, amount, name, reason }) => {
+  const params = new URLSearchParams({
+    type: checkoutType,
+    amount: String(amount),
+    title: name,
+    reason: reason || 'Demo checkout is enabled because Stripe key is not configured.',
+  });
+  if (recipeId) params.set('recipeId', recipeId);
+  return `${clientUrl}/payment/demo-checkout?${params.toString()}`;
 };
 
 const toAmount = (value, fallback) => Number.parseInt(value, 10) || fallback;
@@ -30,38 +42,53 @@ export const createCheckoutSession = asyncHandler(async (req, res) => {
   const clientUrl = getClientUrl();
 
   if (!stripe) {
-    const fakeTransaction = `dev_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     return res.json({
-      url: `${clientUrl}/payment/success?session_id=${fakeTransaction}&type=${checkoutType}${recipeId ? `&recipeId=${recipeId}` : ''}`,
+      url: buildDemoCheckoutUrl({ clientUrl, checkoutType, recipeId, amount, name }),
       devMode: true,
-      message: 'Stripe key is missing. Using development success URL.',
+      message: 'Stripe secret key is missing, so demo checkout is enabled.',
     });
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    payment_method_types: ['card'],
-    customer_email: req.user.email,
-    line_items: [
-      {
-        price_data: {
-          currency: 'bdt',
-          product_data: { name },
-          unit_amount: amount * 100,
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      customer_email: req.user.email,
+      line_items: [
+        {
+          price_data: {
+            currency: (process.env.STRIPE_CURRENCY || 'bdt').toLowerCase(),
+            product_data: { name },
+            unit_amount: amount * 100,
+          },
+          quantity: 1,
         },
-        quantity: 1,
-      },
-    ],
-    metadata,
-    success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&type=${checkoutType}${recipeId ? `&recipeId=${recipeId}` : ''}`,
-    cancel_url: `${clientUrl}${recipeId ? `/recipe/${recipeId}` : '/dashboard/profile'}`,
-  });
+      ],
+      metadata,
+      success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&type=${checkoutType}${recipeId ? `&recipeId=${recipeId}` : ''}`,
+      cancel_url: `${clientUrl}${recipeId ? `/recipe/${recipeId}` : '/dashboard/profile'}`,
+    });
 
-  return res.json({ url: session.url });
+    return res.json({ url: session.url, devMode: false });
+  } catch (error) {
+    return res.json({
+      url: buildDemoCheckoutUrl({
+        clientUrl,
+        checkoutType,
+        recipeId,
+        amount,
+        name,
+        reason: error?.message || 'Stripe checkout could not be created. Demo checkout is enabled.',
+      }),
+      devMode: true,
+      message: error?.message || 'Stripe checkout failed, using demo checkout.',
+    });
+  }
 });
 
 export const savePayment = asyncHandler(async (req, res) => {
   const { sessionId, type, recipeId } = req.body;
+  if (!sessionId) return res.status(400).json({ message: 'Payment session id is missing.' });
   const checkoutType = type === 'recipe' ? 'recipe' : 'premium';
   const amount = checkoutType === 'recipe'
     ? toAmount(process.env.RECIPE_PRICE_BDT, 100)
@@ -87,7 +114,7 @@ export const savePayment = asyncHandler(async (req, res) => {
       paymentStatus: 'success',
       paidAt: new Date(),
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
   );
 
   if (checkoutType === 'premium') {
