@@ -21,9 +21,8 @@ const recipeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-recipeSchema.pre('save', function updateLikesCount(next) {
+recipeSchema.pre('save', function updateLikesCount() {
   this.likesCount = Array.isArray(this.likes) ? this.likes.length : 0;
-  next();
 });
 
 export default mongoose.models.Recipe || mongoose.model('Recipe', recipeSchema);

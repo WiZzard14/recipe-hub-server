@@ -28,7 +28,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.user.id,
     { ...(name ? { name: name.trim() } : {}), ...(image !== undefined ? { image } : {}) },
-    { new: true }
+    { returnDocument: 'after' }
   );
   return res.json({ message: 'Profile updated successfully.', user: toSafeUser(user) });
 });
@@ -55,7 +55,7 @@ export const getAllUsers = asyncHandler(async (req, res) => {
 
 export const setBlockStatus = asyncHandler(async (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ message: 'You cannot block your own account.' });
-  const user = await User.findByIdAndUpdate(req.params.id, { isBlocked: req.body.isBlocked }, { new: true }).select('-password');
+  const user = await User.findByIdAndUpdate(req.params.id, { isBlocked: req.body.isBlocked }, { returnDocument: 'after' }).select('-password');
   if (!user) return res.status(404).json({ message: 'User not found.' });
   return res.json({ message: user.isBlocked ? 'User blocked.' : 'User unblocked.', user: toSafeUser(user) });
 });
