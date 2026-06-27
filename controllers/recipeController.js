@@ -4,6 +4,27 @@ import Payment from '../models/Payment.js';
 import Report from '../models/Report.js';
 import { asyncHandler, getPagination, isValidObjectId } from '../utils.js';
 
+export const RECIPE_CATEGORIES = ['Dinner', 'Lunch', 'Breakfast', 'Dessert', 'Snacks'];
+
+const normalizeCategory = (category = '') => {
+  const value = String(category).trim().toLowerCase();
+  if (value === 'dinner') return 'Dinner';
+  if (value === 'lunch') return 'Lunch';
+  if (value === 'breakfast') return 'Breakfast';
+  if (value === 'dessert' || value === 'desert') return 'Dessert';
+  if (value === 'snack' || value === 'snacks') return 'Snacks';
+  return '';
+};
+
+const validateCategory = (category, res) => {
+  const normalized = normalizeCategory(category);
+  if (!normalized) {
+    res.status(400).json({ message: 'Category must be Dinner, Lunch, Breakfast, Dessert, or Snacks.' });
+    return null;
+  }
+  return normalized;
+};
+
 const getRecipeOr404 = async (id, res) => {
   if (!isValidObjectId(id)) {
     res.status(400).json({ message: 'Invalid recipe id.' });
@@ -30,17 +51,33 @@ export const addRecipe = asyncHandler(async (req, res) => {
       return res.status(403).json({ message: 'Normal users can add maximum 2 recipes. Upgrade to premium for unlimited recipes.' });
     }
   }
+
+  const category = validateCategory(req.body.category, res);
+  if (!category) return null;
+
   const payload = {
-    ...req.body,
+    recipeName: String(req.body.recipeName || '').trim(),
+    recipeImage: String(req.body.recipeImage || '').trim(),
+    category,
+    cuisineType: String(req.body.cuisineType || '').trim(),
+    difficultyLevel: req.body.difficultyLevel,
+    preparationTime: String(req.body.preparationTime || '').trim(),
+    instructions: String(req.body.instructions || '').trim(),
+    isFeatured: user.role === 'admin' ? Boolean(req.body.isFeatured) : false,
     authorId: user.id,
     authorName: user.name,
     authorEmail: user.email,
     ingredients: Array.isArray(req.body.ingredients)
-      ? req.body.ingredients.filter(Boolean)
+      ? req.body.ingredients.map((item) => String(item).trim()).filter(Boolean)
       : String(req.body.ingredients || '').split(',').map((item) => item.trim()).filter(Boolean),
   };
+
+  if (!payload.recipeName || !payload.recipeImage || !payload.cuisineType || !payload.preparationTime || !payload.instructions || !payload.ingredients.length) {
+    return res.status(400).json({ message: 'Please fill all recipe fields.' });
+  }
+
   const recipe = await Recipe.create(payload);
-  return res.status(201).json({ message: 'Recipe added successfully.', recipe });
+  return res.status(201).json({ message: payload.isFeatured ? 'Featured recipe added successfully.' : 'Recipe added successfully.', recipe });
 });
 
 export const getAllRecipes = asyncHandler(async (req, res) => {
@@ -51,15 +88,17 @@ export const getAllRecipes = asyncHandler(async (req, res) => {
     query.$or = [{ recipeName: search }, { category: search }, { cuisineType: search }];
   }
   if (req.query.category) {
-    const categories = String(req.query.category).split(',').map((item) => item.trim()).filter(Boolean);
+    const categories = String(req.query.category)
+      .split(',')
+      .map(normalizeCategory)
+      .filter(Boolean);
     if (categories.length) query.category = { $in: categories };
   }
-  const [data, total, categories] = await Promise.all([
+  const [data, total] = await Promise.all([
     Recipe.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
     Recipe.countDocuments(query),
-    Recipe.distinct('category', { status: 'active' }),
   ]);
-  return res.json({ data, categories, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } });
+  return res.json({ data, categories: RECIPE_CATEGORIES, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } });
 });
 
 export const getFeaturedRecipes = asyncHandler(async (_req, res) => {
@@ -97,7 +136,8 @@ export const updateRecipe = asyncHandler(async (req, res) => {
   const recipe = await getRecipeOr404(req.params.id, res);
   if (!recipe) return null;
   if (!ensureOwnerOrAdmin(recipe, req.user)) return res.status(403).json({ message: 'You can update only your own recipes.' });
-  const allowed = ['recipeName', 'recipeImage', 'category', 'cuisineType', 'difficultyLevel', 'preparationTime', 'ingredients', 'instructions'];
+
+  const allowed = ['recipeName', 'recipeImage', 'cuisineType', 'difficultyLevel', 'preparationTime', 'ingredients', 'instructions'];
   allowed.forEach((key) => {
     if (req.body[key] !== undefined) {
       recipe[key] = key === 'ingredients' && !Array.isArray(req.body[key])
@@ -105,6 +145,17 @@ export const updateRecipe = asyncHandler(async (req, res) => {
         : req.body[key];
     }
   });
+
+  if (req.body.category !== undefined) {
+    const category = validateCategory(req.body.category, res);
+    if (!category) return null;
+    recipe.category = category;
+  }
+
+  if (req.user.role === 'admin' && req.body.isFeatured !== undefined) {
+    recipe.isFeatured = Boolean(req.body.isFeatured);
+  }
+
   await recipe.save();
   return res.json({ message: 'Recipe updated successfully.', recipe });
 });

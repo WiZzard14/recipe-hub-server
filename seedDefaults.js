@@ -4,6 +4,18 @@ import User from './models/User.js';
 
 const sampleImage = (id) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1200&q=80`;
 
+const allowedCategories = ['Dinner', 'Lunch', 'Breakfast', 'Dessert', 'Snacks'];
+
+const normalizeCategory = (category = '') => {
+  const value = String(category).trim().toLowerCase();
+  if (value === 'dinner') return 'Dinner';
+  if (value === 'lunch' || value === 'rice') return 'Lunch';
+  if (value === 'breakfast') return 'Breakfast';
+  if (value === 'dessert' || value === 'desert') return 'Dessert';
+  if (value === 'snack' || value === 'snacks' || value === 'drink') return 'Snacks';
+  return 'Dinner';
+};
+
 const defaultRecipes = [
   {
     recipeName: 'Creamy Garlic Butter Chicken',
@@ -20,7 +32,7 @@ const defaultRecipes = [
   {
     recipeName: 'Spicy Beef Tehari',
     recipeImage: sampleImage('photo-1585937421612-70a008356fbe'),
-    category: 'Rice',
+    category: 'Lunch',
     cuisineType: 'Bangladeshi',
     difficultyLevel: 'Hard',
     preparationTime: '1 hour 15 minutes',
@@ -32,7 +44,7 @@ const defaultRecipes = [
   {
     recipeName: 'Classic Margherita Pizza',
     recipeImage: sampleImage('photo-1604382354936-07c5d9983bd3'),
-    category: 'Snack',
+    category: 'Snacks',
     cuisineType: 'Italian',
     difficultyLevel: 'Medium',
     preparationTime: '45 minutes',
@@ -44,7 +56,7 @@ const defaultRecipes = [
   {
     recipeName: 'Mango Coconut Smoothie',
     recipeImage: sampleImage('photo-1623065422902-30a2d299bbe4'),
-    category: 'Drink',
+    category: 'Snacks',
     cuisineType: 'Fusion',
     difficultyLevel: 'Easy',
     preparationTime: '8 minutes',
@@ -77,7 +89,7 @@ const defaultRecipes = [
   {
     recipeName: 'Chicken Shawarma Wrap',
     recipeImage: sampleImage('photo-1529006557810-274b9b2fc783'),
-    category: 'Snack',
+    category: 'Snacks',
     cuisineType: 'Middle Eastern',
     difficultyLevel: 'Medium',
     preparationTime: '40 minutes',
@@ -120,6 +132,14 @@ export async function seedDefaults() {
     },
     { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
+
+
+  const existingRecipes = await Recipe.find({}, { _id: 1, category: 1 });
+  await Promise.all(existingRecipes.map((recipe) => {
+    const normalized = normalizeCategory(recipe.category);
+    if (allowedCategories.includes(recipe.category) && recipe.category === normalized) return null;
+    return Recipe.updateOne({ _id: recipe._id }, { $set: { category: normalized } });
+  }).filter(Boolean));
 
   const recipeCount = await Recipe.countDocuments();
   if (recipeCount === 0) {
