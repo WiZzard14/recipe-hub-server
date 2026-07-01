@@ -65,7 +65,7 @@ export const getAdminStats = asyncHandler(async (_req, res) => {
     User.countDocuments(),
     Recipe.countDocuments({ status: { $ne: 'removed' } }),
     User.countDocuments({ isPremium: true }),
-    Report.countDocuments({ status: 'pending' }),
+    Report.countDocuments(),
   ]);
   return res.json({ totalUsers, totalRecipes, totalPremiumMembers, totalReports });
 });
